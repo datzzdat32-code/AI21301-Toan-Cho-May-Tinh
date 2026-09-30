@@ -1,0 +1,14 @@
+{
+  "name": "hotel-booking-app-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,yellow.bold\" \"node backend/server.js\" \"npm run dev --prefix frontend\"",
+    "start": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,yellow.bold\" \"node backend/server.js\" \"npm run dev --prefix frontend\"",
+    "dev:backend": "node backend/server.js",
+    "dev:frontend": "npm run dev --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
