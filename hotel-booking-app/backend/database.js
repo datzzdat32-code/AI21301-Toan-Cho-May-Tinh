@@ -39,7 +39,7 @@ const dbGet = (sql, params = []) => {
 
 async function initDB() {
   db.serialize(async () => {
-    // 1. Users table
+    // 1. Bảng Users (Tài khoản)
     await dbRun(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -52,7 +52,30 @@ async function initDB() {
       )
     `);
 
-    // 2. Room Types table
+    // 2. Bảng Locations (Tỉnh thành / Địa điểm du lịch)
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS locations (
+        id TEXT PRIMARY KEY,
+        city_name TEXT NOT NULL,
+        region TEXT NOT NULL DEFAULT 'Miền Trung',
+        image_url TEXT
+      )
+    `);
+
+    // 3. Bảng Hotels (Khách sạn & Resort)
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS hotels (
+        id TEXT PRIMARY KEY,
+        location_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        address TEXT NOT NULL,
+        star_rating INTEGER DEFAULT 5,
+        description TEXT,
+        FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE CASCADE
+      )
+    `);
+
+    // 4. Bảng Room Types (Hạng phòng)
     await dbRun(`
       CREATE TABLE IF NOT EXISTS room_types (
         id TEXT PRIMARY KEY,
@@ -61,11 +84,12 @@ async function initDB() {
       )
     `);
 
-    // 3. Rooms table with location & hotel_name
+    // 5. Bảng Rooms (Phòng nghỉ vật lý)
     await dbRun(`
       CREATE TABLE IF NOT EXISTS rooms (
         id TEXT PRIMARY KEY,
         room_number TEXT UNIQUE NOT NULL,
+        hotel_id TEXT,
         room_type_id TEXT NOT NULL,
         name TEXT NOT NULL,
         description TEXT NOT NULL,
@@ -80,16 +104,49 @@ async function initDB() {
         is_available BOOLEAN DEFAULT 1,
         rating REAL DEFAULT 4.8,
         review_count INTEGER DEFAULT 12,
-        FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE
+        FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE,
+        FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
       )
     `);
 
-    // 4. Bookings table
+    // 6. Bảng Amenities (Danh mục tiện nghi)
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS amenities (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        icon_code TEXT
+      )
+    `);
+
+    // 7. Bảng Room_Amenities (Bảng trung gian N-N phòng & tiện nghi)
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS room_amenities (
+        room_id TEXT NOT NULL,
+        amenity_id TEXT NOT NULL,
+        PRIMARY KEY (room_id, amenity_id),
+        FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+        FOREIGN KEY (amenity_id) REFERENCES amenities(id) ON DELETE CASCADE
+      )
+    `);
+
+    // 8. Bảng Vouchers (Mã giảm giá Promo)
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS vouchers (
+        id TEXT PRIMARY KEY,
+        code TEXT UNIQUE NOT NULL,
+        discount_amount REAL NOT NULL,
+        min_spend REAL DEFAULT 0,
+        is_active BOOLEAN DEFAULT 1
+      )
+    `);
+
+    // 9. Bảng Bookings (Đơn đặt phòng)
     await dbRun(`
       CREATE TABLE IF NOT EXISTS bookings (
         id TEXT PRIMARY KEY,
         user_id TEXT,
         room_id TEXT NOT NULL,
+        voucher_id TEXT,
         check_in TEXT NOT NULL,
         check_out TEXT NOT NULL,
         guest_count INTEGER NOT NULL,
@@ -100,11 +157,12 @@ async function initDB() {
         guest_phone TEXT NOT NULL,
         special_requests TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
+        FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+        FOREIGN KEY (voucher_id) REFERENCES vouchers(id) ON DELETE SET NULL
       )
     `);
 
-    // 5. Payments table
+    // 10. Bảng Payments (Nhật ký giao dịch thanh toán tài chính)
     await dbRun(`
       CREATE TABLE IF NOT EXISTS payments (
         id TEXT PRIMARY KEY,
@@ -118,7 +176,7 @@ async function initDB() {
       )
     `);
 
-    // 6. Reviews table
+    // 11. Bảng Reviews (Đánh giá & Phản hồi)
     await dbRun(`
       CREATE TABLE IF NOT EXISTS reviews (
         id TEXT PRIMARY KEY,
@@ -147,6 +205,38 @@ async function initDB() {
 }
 
 async function seedInitialData() {
+  // 1. Seed Locations
+  const locCount = await dbGet('SELECT COUNT(*) as count FROM locations');
+  if (locCount.count === 0) {
+    const locs = [
+      ['loc_phuquoc', 'Phú Quốc', 'Miền Nam', 'https://images.unsplash.com/photo-1540541338287-41700207dee6?auto=format&fit=crop&w=800&q=80'],
+      ['loc_danang', 'Đà Nẵng', 'Miền Trung', 'https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=800&q=80'],
+      ['loc_dalat', 'Đà Lạt', 'Tây Nguyên', 'https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=800&q=80'],
+      ['loc_hcm', 'TP. Hồ Chí Minh', 'Miền Nam', 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80'],
+      ['loc_hanoi', 'Hà Nội', 'Miền Bắc', 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80'],
+      ['loc_nhatrang', 'Nha Trang', 'Miền Trung', 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=800&q=80'],
+      ['loc_sapa', 'Sapa', 'Miền Bắc', 'https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=800&q=80'],
+      ['loc_vungtau', 'Vũng Tàu', 'Miền Nam', 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=800&q=80']
+    ];
+    for (const l of locs) {
+      await dbRun('INSERT INTO locations (id, city_name, region, image_url) VALUES (?, ?, ?, ?)', l);
+    }
+  }
+
+  // 2. Seed Vouchers
+  const vchCount = await dbGet('SELECT COUNT(*) as count FROM vouchers');
+  if (vchCount.count === 0) {
+    const vouchers = [
+      ['vch_1', 'VNSTAY2026', 200000, 1500000, 1],
+      ['vch_2', 'SUMMERFUN', 350000, 2000000, 1],
+      ['vch_3', 'FIRSTSTAY', 100000, 500000, 1]
+    ];
+    for (const v of vouchers) {
+      await dbRun('INSERT INTO vouchers (id, code, discount_amount, min_spend, is_active) VALUES (?, ?, ?, ?, ?)', v);
+    }
+  }
+
+  // 3. Seed Users
   const userCount = await dbGet('SELECT COUNT(*) as count FROM users');
   if (userCount.count === 0) {
     console.log('🌱 Seeding initial user data...');
@@ -167,7 +257,7 @@ async function seedInitialData() {
     }
   }
 
-  // Seed Room Types if empty
+  // 4. Seed Room Types
   const rtCount = await dbGet('SELECT COUNT(*) as count FROM room_types');
   if (rtCount.count === 0) {
     const roomTypes = [
@@ -182,7 +272,7 @@ async function seedInitialData() {
     }
   }
 
-  // Seed Nationwide Vietnam Hotels & Rooms if count < 8
+  // 5. Seed Nationwide Vietnam Hotels & Rooms
   const roomCount = await dbGet('SELECT COUNT(*) as count FROM rooms');
   if (roomCount.count < 8) {
     console.log('🌱 Seeding Nationwide Vietnam Hotels & Rooms...');
