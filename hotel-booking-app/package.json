@@ -6,7 +6,8 @@
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,yellow.bold\" \"node backend/server.js\" \"npm run dev --prefix frontend\"",
     "start": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,yellow.bold\" \"node backend/server.js\" \"npm run dev --prefix frontend\"",
     "dev:backend": "node backend/server.js",
-    "dev:frontend": "npm run dev --prefix frontend"
+    "dev:frontend": "npm run dev --prefix frontend",
+    "db:reset": "node backend/reset_db.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

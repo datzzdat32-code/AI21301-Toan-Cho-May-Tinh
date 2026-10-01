@@ -5,6 +5,10 @@ const bcrypt = require('bcryptjs');
 const dbPath = path.resolve(__dirname, 'hotel.db');
 const db = new sqlite3.Database(dbPath);
 
+// Enable WAL Mode and Foreign Keys for High Performance & Integrity
+db.run('PRAGMA journal_mode = WAL;');
+db.run('PRAGMA foreign_keys = ON;');
+
 // Promisified helper methods
 const dbRun = (sql, params = []) => {
   return new Promise((resolve, reject) => {
@@ -76,13 +80,9 @@ async function initDB() {
         is_available BOOLEAN DEFAULT 1,
         rating REAL DEFAULT 4.8,
         review_count INTEGER DEFAULT 12,
-        FOREIGN KEY (room_type_id) REFERENCES room_types(id)
+        FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE
       )
     `);
-
-    // Alter table safety check for existing SQLite database
-    try { await dbRun("ALTER TABLE rooms ADD COLUMN location TEXT DEFAULT 'Phú Quốc'"); } catch (e) {}
-    try { await dbRun("ALTER TABLE rooms ADD COLUMN hotel_name TEXT DEFAULT 'Grand Horizon Resort'"); } catch (e) {}
 
     // 4. Bookings table
     await dbRun(`
@@ -100,7 +100,7 @@ async function initDB() {
         guest_phone TEXT NOT NULL,
         special_requests TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (room_id) REFERENCES rooms(id)
+        FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
       )
     `);
 
@@ -114,7 +114,7 @@ async function initDB() {
         amount REAL NOT NULL,
         status TEXT NOT NULL DEFAULT 'PENDING',
         paid_at DATETIME,
-        FOREIGN KEY (booking_id) REFERENCES bookings(id)
+        FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
       )
     `);
 
@@ -128,9 +128,18 @@ async function initDB() {
         rating INTEGER NOT NULL,
         comment TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (room_id) REFERENCES rooms(id)
+        FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
       )
     `);
+
+    // Create Indexes for High Performance Querying
+    await dbRun('CREATE INDEX IF NOT EXISTS idx_rooms_location ON rooms(location)');
+    await dbRun('CREATE INDEX IF NOT EXISTS idx_rooms_available ON rooms(is_available)');
+    await dbRun('CREATE INDEX IF NOT EXISTS idx_bookings_user ON bookings(user_id)');
+    await dbRun('CREATE INDEX IF NOT EXISTS idx_bookings_room ON bookings(room_id)');
+    await dbRun('CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status)');
+    await dbRun('CREATE INDEX IF NOT EXISTS idx_payments_booking ON payments(booking_id)');
+    await dbRun('CREATE INDEX IF NOT EXISTS idx_reviews_room ON reviews(room_id)');
 
     // Seed Data if empty or missing nationwide hotels
     await seedInitialData();
@@ -145,15 +154,17 @@ async function seedInitialData() {
     const adminPasswordHash = await bcrypt.hash('admin123', 10);
     const userPasswordHash = await bcrypt.hash('user123', 10);
 
-    await dbRun(
-      'INSERT INTO users (id, name, email, password, role, phone) VALUES (?, ?, ?, ?, ?, ?)',
-      ['usr_admin', 'Quản Trị Viên (Admin)', 'admin@grandhorizon.com', adminPasswordHash, 'ADMIN', '0901234567']
-    );
+    const sampleUsers = [
+      ['usr_admin', 'Quản Trị Viên (Admin)', 'admin@grandhorizon.com', adminPasswordHash, 'ADMIN', '0901234567'],
+      ['usr_cust_01', 'Nguyễn Văn An', 'khachhang@gmail.com', userPasswordHash, 'CUSTOMER', '0987654321'],
+      ['usr_cust_02', 'Trần Thị Bình', 'tran.thi.b@gmail.com', userPasswordHash, 'CUSTOMER', '0912345678'],
+      ['usr_cust_03', 'Lê Văn Cường', 'le.van.c@gmail.com', userPasswordHash, 'CUSTOMER', '0934567890'],
+      ['usr_cust_04', 'Phạm Thị Dung', 'pham.thi.d@gmail.com', userPasswordHash, 'CUSTOMER', '0978901234']
+    ];
 
-    await dbRun(
-      'INSERT INTO users (id, name, email, password, role, phone) VALUES (?, ?, ?, ?, ?, ?)',
-      ['usr_demo', 'Nguyễn Văn An', 'khachhang@gmail.com', userPasswordHash, 'CUSTOMER', '0987654321']
-    );
+    for (const u of sampleUsers) {
+      await dbRun('INSERT INTO users (id, name, email, password, role, phone) VALUES (?, ?, ?, ?, ?, ?)', u);
+    }
   }
 
   // Seed Room Types if empty
@@ -206,7 +217,7 @@ async function seedInitialData() {
         name: 'Beachfront Infinity Pool Villa (2 Phòng Ngủ)',
         hotel_name: 'Phú Quốc Coral Bay Villa & Resort',
         location: 'Phú Quốc',
-        description: 'Biệt thự nguyên căn sát biển với hồ bơi vô cực riêng ngắm hoàng hôn Phú Quốc. Thiết kế không gian mở hòa quyện cùng thiên nhiên bãi bãi biển hoang sơ.',
+        description: 'Biệt thự nguyên căn sát biển với hồ bơi vô cực riêng ngắm hoàng hôn Phú Quốc. Thiết kế không gian mở hòa quyện cùng thiên nhiên bãi biển hoang sơ.',
         price_per_night: 7500000,
         capacity: 6,
         bed_count: 3,
