@@ -166,37 +166,21 @@ export default function CheckoutPage() {
                 <span>Phương Thức Thanh Toán</span>
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                 
-                {/* VNPAY */}
-                <label
-                  onClick={() => setPaymentMethod('VNPAY')}
-                  className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${
-                    paymentMethod === 'VNPAY'
-                      ? 'bg-blue-50/80 border-blue-600 text-slate-900 shadow-sm'
-                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <QrCode className="w-6 h-6 text-blue-600 shrink-0" />
-                  <div>
-                    <h4 className="font-bold text-xs text-slate-900">VNPay QR Code</h4>
-                    <p className="text-[11px] text-slate-500">Quét mã Banking tự động</p>
-                  </div>
-                </label>
-
                 {/* MOMO */}
                 <label
                   onClick={() => setPaymentMethod('MOMO_QR')}
                   className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${
                     paymentMethod === 'MOMO_QR'
-                      ? 'bg-blue-50/80 border-blue-600 text-slate-900 shadow-sm'
+                      ? 'bg-pink-50/80 border-pink-600 text-slate-900 shadow-sm'
                       : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
                   }`}
                 >
                   <QrCode className="w-6 h-6 text-pink-600 shrink-0" />
                   <div>
                     <h4 className="font-bold text-xs text-slate-900">Ví ĐT MoMo QR</h4>
-                    <p className="text-[11px] text-slate-500">Thanh toán app MoMo nhanh</p>
+                    <p className="text-[11px] text-slate-500">Quét mã app MoMo</p>
                   </div>
                 </label>
 
