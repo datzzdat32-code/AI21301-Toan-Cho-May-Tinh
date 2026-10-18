@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
-import PaymentModal from '../components/PaymentModal';
 import { ShieldCheck, Calendar, Users, QrCode, CreditCard, Building2, Lock, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 export default function CheckoutPage() {
@@ -25,14 +24,11 @@ export default function CheckoutPage() {
 
   const { room, checkIn, checkOut, nights, totalPrice, guestCount, specialRequests: initialRequests } = state;
 
-  const [guestName, setGuestName] = useState(user?.name || '');
+  const [guestName, setGuestName] = useState(user?.name || user?.full_name || '');
   const [guestEmail, setGuestEmail] = useState(user?.email || '');
   const [guestPhone, setGuestPhone] = useState(user?.phone || '0901234567');
   const [specialRequests, setSpecialRequests] = useState(initialRequests || '');
   const [paymentMethod, setPaymentMethod] = useState('VNPAY');
-
-  const [createdBooking, setCreatedBooking] = useState(null);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const formatVND = (price) => {
@@ -48,6 +44,7 @@ export default function CheckoutPage() {
 
     setSubmitting(true);
     try {
+      // 1. Tạo đơn đặt phòng
       const res = await axios.post('/api/bookings', {
         roomId: room.id,
         checkIn,
@@ -60,19 +57,19 @@ export default function CheckoutPage() {
         userId: user?.id
       });
 
-      setCreatedBooking(res.data.booking);
-      setShowPaymentModal(true);
+      const newBooking = res.data.booking;
+
+      // 2. Xác nhận thanh toán trực tiếp theo phương thức đã chọn
+      await axios.post(`/api/bookings/${newBooking.id}/pay`, { method: paymentMethod });
+
+      alert('🎉 Đặt phòng thành công! Đơn đặt của bạn đã được xác nhận.');
+      navigate('/my-bookings');
     } catch (error) {
       console.error('Booking creation error:', error);
       alert(error.response?.data?.error || 'Không thể khởi tạo đơn đặt phòng. Vui lòng thử lại!');
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const handlePaymentSuccess = () => {
-    setShowPaymentModal(false);
-    navigate('/my-bookings');
   };
 
   return (
@@ -292,10 +289,10 @@ export default function CheckoutPage() {
               <button
                 onClick={handleProceedToPayment}
                 disabled={submitting}
-                className="w-full py-3 rounded-xl font-bold text-xs bg-blue-600 text-white hover:bg-blue-700 shadow-sm flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                className="w-full py-3.5 rounded-xl font-bold text-xs bg-blue-600 text-white hover:bg-blue-700 shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
                 <Lock className="w-4 h-4" />
-                <span>{submitting ? 'Đang Khởi Tạo...' : 'Xác Nhận & Thanh Toán'}</span>
+                <span>{submitting ? 'Đang Xử Lý Đặt Phòng...' : 'Xác Nhận & Hoàn Tất Đặt Phòng'}</span>
               </button>
 
               <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500 font-medium">
@@ -308,16 +305,6 @@ export default function CheckoutPage() {
         </div>
 
       </div>
-
-      {/* Payment Modal */}
-      {showPaymentModal && createdBooking && (
-        <PaymentModal
-          booking={createdBooking}
-          method={paymentMethod}
-          onClose={() => setShowPaymentModal(false)}
-          onSuccess={handlePaymentSuccess}
-        />
-      )}
     </div>
   );
 }
