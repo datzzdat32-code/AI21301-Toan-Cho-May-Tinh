@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 const { dbRun, dbAll, dbGet, initDB } = require('./database');
 
 const app = express();
@@ -793,7 +794,85 @@ app.get('/api/bookings/:id', async (req, res) => {
 });
 
 // ----------------------------------------------------
-// 6. PAYMENTS & REFUNDS API (payments, refunds tables)
+// 6. MOMO WALLET OFFICIAL GATEWAY API (https://github.com/momo-wallet)
+// ----------------------------------------------------
+app.post('/api/payments/momo/create', async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+    if (!bookingId) return res.status(400).json({ error: 'Thiếu mã đơn đặt phòng' });
+
+    const booking = await dbGet('SELECT * FROM bookings WHERE id = ?', [bookingId]);
+    if (!booking) return res.status(404).json({ error: 'Đơn đặt phòng không tồn tại' });
+
+    // Official MoMo Sandbox Credentials
+    const partnerCode = process.env.MOMO_PARTNER_CODE || 'MOMO';
+    const accessKey = process.env.MOMO_ACCESS_KEY || 'F8BBA842ECF85';
+    const secretKey = process.env.MOMO_SECRET_KEY || 'K951B6PE1waDMi640xX08PD3vg6EkVlz';
+    const endpoint = 'https://test-payment.momo.vn/v2/gateway/api/create';
+
+    const orderId = `${partnerCode}_${booking.id}_${Date.now()}`;
+    const requestId = orderId;
+    const amount = String(Math.round(booking.final_amount));
+    const orderInfo = `Thanh toan phong ${booking.booking_code} tai VnStay.vn`;
+    const redirectUrl = `http://localhost:3000/my-bookings?payment=success&bookingId=${booking.id}`;
+    const ipnUrl = `http://localhost:5000/api/payments/momo/ipn`;
+    const requestType = 'captureWallet';
+    const extraData = '';
+
+    const rawSignature = `accessKey=${accessKey}&amount=${amount}&extraData=${extraData}&ipnUrl=${ipnUrl}&orderId=${orderId}&orderInfo=${orderInfo}&partnerCode=${partnerCode}&redirectUrl=${redirectUrl}&requestId=${requestId}&requestType=${requestType}`;
+    const signature = crypto.createHmac('sha256', secretKey).update(rawSignature).digest('hex');
+
+    const requestBody = {
+      partnerCode,
+      partnerName: 'VnStay Resort & Hotel',
+      storeId: 'VnStayStore',
+      requestId,
+      amount,
+      orderId,
+      orderInfo,
+      redirectUrl,
+      ipnUrl,
+      lang: 'vi',
+      requestType,
+      autoCapture: true,
+      extraData,
+      signature
+    };
+
+    let momoData = null;
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+      momoData = await response.json();
+    } catch (apiErr) {
+      console.warn('MoMo Gateway API connection warning:', apiErr.message);
+    }
+
+    // VietQR format compatible with MoMo Wallet scanner
+    const vietQrUrl = `https://img.vietqr.io/image/970422-0901234567-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(booking.booking_code)}&accountName=VNSTAY%20RESORT`;
+
+    res.json({
+      success: true,
+      bookingId: booking.id,
+      bookingCode: booking.booking_code,
+      amount: booking.final_amount,
+      payUrl: momoData?.payUrl || null,
+      deeplink: momoData?.deeplink || null,
+      qrCodeUrl: momoData?.qrCodeUrl || null,
+      vietQrUrl,
+      orderInfo
+    });
+  } catch (error) {
+    console.error('MoMo Create Payment error:', error);
+    res.status(500).json({ error: 'Lỗi khi tạo mã thanh toán MoMo' });
+  }
+});
+
+// ----------------------------------------------------
+// 7. PAYMENTS & REFUNDS API (payments, refunds tables)
 // ----------------------------------------------------
 app.post('/api/bookings/:id/pay', async (req, res) => {
   try {

@@ -3,12 +3,14 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { Calendar, QrCode, Clock, CheckCircle2, XCircle, AlertCircle, Sparkles, Building2 } from 'lucide-react';
+import MoMoPaymentModal from '../components/MoMoPaymentModal';
 
 export default function MyBookingsPage() {
   const { user } = useAuth();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedVoucher, setSelectedVoucher] = useState(null);
+  const [selectedMoMoBooking, setSelectedMoMoBooking] = useState(null);
 
   const fetchMyBookings = async () => {
     try {
@@ -167,6 +169,16 @@ export default function MyBookingsPage() {
                     </div>
 
                     <div className="flex flex-col gap-1.5">
+                      {booking.status === 'PENDING' && (
+                        <button
+                          onClick={() => setSelectedMoMoBooking(booking)}
+                          className="w-full py-1.5 px-3 rounded-lg font-bold text-xs bg-pink-50 hover:bg-pink-100 text-[#A50064] border border-pink-200 flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <QrCode className="w-3.5 h-3.5 text-[#A50064]" />
+                          <span>Quét Mã MoMo</span>
+                        </button>
+                      )}
+
                       {booking.status === 'CONFIRMED' && (
                         <button
                           onClick={() => setSelectedVoucher(booking)}
@@ -226,6 +238,19 @@ export default function MyBookingsPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* MoMo Payment Modal */}
+      {selectedMoMoBooking && (
+        <MoMoPaymentModal
+          booking={selectedMoMoBooking}
+          onClose={() => setSelectedMoMoBooking(null)}
+          onSuccess={() => {
+            setSelectedMoMoBooking(null);
+            alert('🎉 Thanh toán MoMo thành công! Đơn đặt phòng đã được xác nhận.');
+            fetchMyBookings();
+          }}
+        />
       )}
     </div>
   );

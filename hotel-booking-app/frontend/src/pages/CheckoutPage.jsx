@@ -3,6 +3,7 @@ import { useLocation, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { ShieldCheck, Calendar, Users, QrCode, CreditCard, Building2, Lock, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import MoMoPaymentModal from '../components/MoMoPaymentModal';
 
 export default function CheckoutPage() {
   const location = useLocation();
@@ -28,8 +29,9 @@ export default function CheckoutPage() {
   const [guestEmail, setGuestEmail] = useState(user?.email || '');
   const [guestPhone, setGuestPhone] = useState(user?.phone || '0901234567');
   const [specialRequests, setSpecialRequests] = useState(initialRequests || '');
-  const [paymentMethod, setPaymentMethod] = useState('VNPAY');
+  const [paymentMethod, setPaymentMethod] = useState('MOMO_QR');
   const [submitting, setSubmitting] = useState(false);
+  const [activeMoMoBooking, setActiveMoMoBooking] = useState(null);
 
   const formatVND = (price) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(price);
@@ -59,11 +61,20 @@ export default function CheckoutPage() {
 
       const newBooking = res.data.booking;
 
-      // 2. Xác nhận thanh toán trực tiếp theo phương thức đã chọn
-      await axios.post(`/api/bookings/${newBooking.id}/pay`, { method: paymentMethod });
-
-      alert('🎉 Đặt phòng thành công! Đơn đặt của bạn đã được xác nhận.');
-      navigate('/my-bookings');
+      // 2. Nếu chọn MoMo QR, mở modal quét mã thật qua MoMo Gateway
+      if (paymentMethod === 'MOMO_QR') {
+        setActiveMoMoBooking({
+          ...newBooking,
+          total_price: totalPrice,
+          guest_name: guestName,
+          booking_code: newBooking.booking_code || `BK${newBooking.id}`
+        });
+      } else {
+        // Xác nhận thanh toán trực tiếp
+        await axios.post(`/api/bookings/${newBooking.id}/pay`, { method: paymentMethod });
+        alert('🎉 Đặt phòng thành công! Đơn đặt của bạn đã được xác nhận.');
+        navigate('/my-bookings');
+      }
     } catch (error) {
       console.error('Booking creation error:', error);
       alert(error.response?.data?.error || 'Không thể khởi tạo đơn đặt phòng. Vui lòng thử lại!');
@@ -305,6 +316,21 @@ export default function CheckoutPage() {
         </div>
 
       </div>
+
+      {activeMoMoBooking && (
+        <MoMoPaymentModal
+          booking={activeMoMoBooking}
+          onClose={() => {
+            setActiveMoMoBooking(null);
+            navigate('/my-bookings');
+          }}
+          onSuccess={() => {
+            setActiveMoMoBooking(null);
+            alert('🎉 Thanh toán MoMo thành công! Đơn đặt phòng của bạn đã được xác nhận.');
+            navigate('/my-bookings');
+          }}
+        />
+      )}
     </div>
   );
 }
