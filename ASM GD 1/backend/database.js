@@ -176,6 +176,46 @@ async function initDB() {
       )
     `);
 
+    // 10b. Bảng Cấu Hình Nhận Tiền Thật (MoMo & VNPay / VietQR)
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS payment_configs (
+        id INTEGER PRIMARY KEY,
+        data TEXT NOT NULL
+      )
+    `);
+
+    // 10c. Bảng Thông Báo Cho Quản Trị Viên (Admin Notifications)
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        booking_id TEXT,
+        amount REAL,
+        guest_name TEXT,
+        room_name TEXT,
+        is_read BOOLEAN DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Migration: Thêm các cột hoàn tiền (Refund Support) cho bảng bookings
+    const refundColumns = [
+      'ALTER TABLE bookings ADD COLUMN refund_bank TEXT',
+      'ALTER TABLE bookings ADD COLUMN refund_account_no TEXT',
+      'ALTER TABLE bookings ADD COLUMN refund_account_name TEXT',
+      'ALTER TABLE bookings ADD COLUMN refund_reason TEXT',
+      'ALTER TABLE bookings ADD COLUMN refunded_at DATETIME'
+    ];
+    for (const colSql of refundColumns) {
+      try {
+        await dbRun(colSql);
+      } catch (e) {
+        // Cột đã tồn tại, bỏ qua
+      }
+    }
+
     // 11. Bảng Reviews (Đánh giá & Phản hồi)
     await dbRun(`
       CREATE TABLE IF NOT EXISTS reviews (
@@ -278,6 +318,28 @@ async function seedInitialData() {
     console.log('🌱 Seeding Nationwide Vietnam Hotels & Rooms...');
 
     const nationwideRooms = [
+      // PHÒNG THỬ NGHIỆM THANH TOÁN THẬT 10K (TEST VIETQR / VNPAY)
+      {
+        id: 'rm_test_10k',
+        room_number: '999',
+        room_type_id: 'rt_standard',
+        name: 'Phòng Trải Nghiệm Thanh Toán 10.000đ (Test Thử Quét VietQR / VNPay)',
+        hotel_name: 'VnStay Test Hotel & Resort',
+        location: 'Đà Nẵng',
+        description: 'Phòng thử nghiệm giao dịch tiền thật siêu tốc với giá đúng 10.000đ/đêm. Quét mã VietQR hoặc VNPay để chuyển thẳng 10k về tài khoản ngân hàng MBBank của Quản trị viên (Admin) và kiểm tra tính năng thông báo tức thì.',
+        price_per_night: 10000,
+        capacity: 2,
+        bed_count: 1,
+        size_sqm: 35,
+        images: JSON.stringify([
+          'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=1200&q=80',
+          'https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=1200&q=80'
+        ]),
+        amenities: JSON.stringify(['Thanh Toán Thật 10.000đ', 'Quét QR Siêu Tốc', 'Báo Về Admin Tức Thì', 'Wifi Tốc độ cao', 'Điều hòa 2 chiều']),
+        is_available: 1,
+        rating: 5.0,
+        review_count: 99
+      },
       // PHÚ QUỐC
       {
         id: 'rm_101',

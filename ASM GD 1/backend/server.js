@@ -315,13 +315,22 @@ app.get('/api/amenities', async (req, res) => {
 
 app.get('/api/rooms', async (req, res) => {
   try {
-    const { capacity, minPrice, maxPrice, roomTypeId, location, search, sortBy } = req.query;
+    const { capacity, minPrice, maxPrice, roomTypeId, location, search, sortBy, status, checkIn, checkOut } = req.query;
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Tự động chuyển trạng thái COMPLETED cho các đơn khách đã trả phòng trong quá khứ
+    await dbRun(
+      `UPDATE bookings 
+       SET status = 'COMPLETED' 
+       WHERE check_out <= ? AND status IN ('CONFIRMED', 'PAID')`,
+      [todayStr]
+    ).catch(() => {});
 
     let sql = `
       SELECT r.*, rt.name as room_type_name 
       FROM rooms r
       JOIN room_types rt ON r.room_type_id = rt.id
-      WHERE r.is_available = 1
+      WHERE 1=1
     `;
     const params = [];
 
@@ -367,11 +376,60 @@ app.get('/api/rooms', async (req, res) => {
 
     const rows = await dbAll(sql, params);
 
-    const rooms = rows.map(r => ({
-      ...r,
-      images: JSON.parse(r.images || '[]'),
-      amenities: JSON.parse(r.amenities || '[]')
-    }));
+    // Lấy thông tin các đơn đặt phòng chưa hết hạn lưu trú (check_out > today)
+    const activeBookings = await dbAll(
+      `SELECT room_id, guest_name, check_in, check_out, status 
+       FROM bookings 
+       WHERE status IN ('CONFIRMED', 'PAID', 'PENDING', 'AWAITING_PAYMENT_CONFIRMATION')
+         AND check_out > ?`,
+      [todayStr]
+    );
+
+    const bookingsByRoom = {};
+    activeBookings.forEach(b => {
+      if (!bookingsByRoom[b.room_id]) bookingsByRoom[b.room_id] = [];
+      bookingsByRoom[b.room_id].push(b);
+    });
+
+    let rooms = rows.map(r => {
+      const roomBookings = bookingsByRoom[r.id] || [];
+      let isOccupied = false;
+      let overlappingBooking = null;
+
+      // Nếu khách tìm kiếm theo khoảng ngày cụ thể:
+      // Kiểm tra trùng lịch: b.check_in < reqCheckOut AND b.check_out > reqCheckIn
+      if (checkIn && checkOut) {
+        overlappingBooking = roomBookings.find(b => b.check_in < checkOut && b.check_out > checkIn);
+        isOccupied = r.is_available === 0 || !!overlappingBooking;
+      } else {
+        // Nếu xem trang chủ theo ngày hiện tại:
+        // Phòng kín nếu hôm nay nằm trong đợt ở: b.check_in <= todayStr AND b.check_out > todayStr
+        const currentStay = roomBookings.find(b => b.check_in <= todayStr && b.check_out > todayStr);
+        isOccupied = r.is_available === 0 || !!currentStay;
+        overlappingBooking = currentStay;
+      }
+
+      return {
+        ...r,
+        images: JSON.parse(r.images || '[]'),
+        amenities: JSON.parse(r.amenities || '[]'),
+        occupancy_status: isOccupied ? 'OCCUPIED' : 'AVAILABLE',
+        is_occupied: isOccupied,
+        is_available: isOccupied ? 0 : 1,
+        active_booking: overlappingBooking || null,
+        booked_ranges: roomBookings.map(b => ({
+          check_in: b.check_in,
+          check_out: b.check_out,
+          status: b.status
+        }))
+      };
+    });
+
+    if (status === 'AVAILABLE') {
+      rooms = rooms.filter(r => r.occupancy_status === 'AVAILABLE');
+    } else if (status === 'OCCUPIED') {
+      rooms = rooms.filter(r => r.occupancy_status === 'OCCUPIED');
+    }
 
     res.json(rooms);
   } catch (error) {
@@ -382,6 +440,7 @@ app.get('/api/rooms', async (req, res) => {
 
 app.get('/api/rooms/:id', async (req, res) => {
   try {
+    const todayStr = new Date().toISOString().split('T')[0];
     const room = await dbGet(
       `SELECT r.*, rt.name as room_type_name, rt.description as room_type_desc
        FROM rooms r
@@ -394,6 +453,32 @@ app.get('/api/rooms/:id', async (req, res) => {
 
     room.images = JSON.parse(room.images || '[]');
     room.amenities = JSON.parse(room.amenities || '[]');
+
+    // Lấy tất cả các đợt phòng đã có khách đặt chưa hết hạn
+    const activeBookings = await dbAll(
+      `SELECT id, guest_name, check_in, check_out, status 
+       FROM bookings 
+       WHERE room_id = ? 
+         AND status IN ('CONFIRMED', 'PAID', 'PENDING', 'AWAITING_PAYMENT_CONFIRMATION')
+         AND check_out > ?
+       ORDER BY check_in ASC`,
+      [req.params.id, todayStr]
+    );
+
+    // Kiểm tra xem hôm nay có khách đang ở hay không
+    const currentStay = activeBookings.find(b => b.check_in <= todayStr && b.check_out > todayStr);
+    const isOccupiedToday = room.is_available === 0 || !!currentStay;
+
+    room.occupancy_status = isOccupiedToday ? 'OCCUPIED' : 'AVAILABLE';
+    room.is_occupied = isOccupiedToday;
+    room.current_stay = currentStay || null;
+    room.booked_ranges = activeBookings.map(b => ({
+      id: b.id,
+      check_in: b.check_in,
+      check_out: b.check_out,
+      guest_name: b.guest_name,
+      status: b.status
+    }));
 
     const reviews = await dbAll('SELECT * FROM reviews WHERE room_id = ? ORDER BY created_at DESC', [req.params.id]);
 
@@ -416,6 +501,20 @@ app.post('/api/bookings', async (req, res) => {
 
     const room = await dbGet('SELECT * FROM rooms WHERE id = ?', [roomId]);
     if (!room) return res.status(404).json({ error: 'Không tìm thấy thông tin phòng' });
+
+    // Kiểm tra xem khoảng ngày khách chọn có bị trùng lịch với đơn đặt phòng khác không
+    const overlap = await dbGet(
+      `SELECT id, guest_name, check_in, check_out FROM bookings 
+       WHERE room_id = ? 
+         AND status IN ('CONFIRMED', 'PAID', 'PENDING', 'AWAITING_PAYMENT_CONFIRMATION')
+         AND check_in < ? AND check_out > ?`,
+      [roomId, checkOut, checkIn]
+    );
+    if (overlap) {
+      return res.status(400).json({ 
+        error: `Phòng đã có lịch khách đặt từ ngày ${overlap.check_in} đến ${overlap.check_out}. Quý khách vui lòng chọn các ngày khác còn trống!` 
+      });
+    }
 
     const start = new Date(checkIn);
     const end = new Date(checkOut);
@@ -495,13 +594,23 @@ app.post('/api/bookings/:id/pay', async (req, res) => {
     const { method } = req.body;
     const bookingId = req.params.id;
 
-    const booking = await dbGet('SELECT * FROM bookings WHERE id = ?', [bookingId]);
+    const booking = await dbGet(
+      `SELECT b.*, r.name as room_name, r.room_number 
+       FROM bookings b 
+       LEFT JOIN rooms r ON b.room_id = r.id 
+       WHERE b.id = ?`, 
+      [bookingId]
+    );
     if (!booking) return res.status(404).json({ error: 'Đơn đặt phòng không tồn tại' });
 
     const paymentId = 'pay_' + Date.now();
     const transactionId = 'TXN' + Math.floor(100000 + Math.random() * 900000);
-    const status = method === 'PAY_AT_HOTEL' ? 'PENDING' : 'SUCCESS';
-    const bookingStatus = method === 'PAY_AT_HOTEL' ? 'PENDING' : 'CONFIRMED';
+    const isPayAtHotel = method === 'PAY_AT_HOTEL';
+    
+    // Nếu khách chuyển khoản QR: chuyển trạng thái chờ Admin kiểm tra tài khoản
+    // Nếu khách thanh toán tại quầy: chuyển trạng thái PENDING
+    const status = isPayAtHotel ? 'PENDING' : 'AWAITING_CONFIRMATION';
+    const bookingStatus = isPayAtHotel ? 'PENDING' : 'AWAITING_PAYMENT_CONFIRMATION';
 
     await dbRun(
       `INSERT INTO payments (id, booking_id, method, transaction_id, amount, status, paid_at)
@@ -511,14 +620,293 @@ app.post('/api/bookings/:id/pay', async (req, res) => {
 
     await dbRun('UPDATE bookings SET status = ? WHERE id = ?', [bookingStatus, bookingId]);
 
+    const formattedPrice = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(booking.total_price);
+    const notifId = 'notif_' + Date.now();
+
+    if (!isPayAtHotel) {
+      // Gửi thông báo đến Admin: Khách báo đã chuyển khoản, Admin cần kiểm tra tài khoản ngân hàng để duyệt
+      await dbRun(
+        `INSERT INTO notifications (id, type, title, message, booking_id, amount, guest_name, room_name, is_read, created_at)
+         VALUES (?, 'PAYMENT_SUBMITTED', ?, ?, ?, ?, ?, ?, 0, DATETIME('now'))`,
+        [
+          notifId,
+          'Khách Báo Đã Chuyển Tiền - Cần Kiểm Tra & Xác Nhận!',
+          `Khách hàng ${booking.guest_name} (${booking.guest_phone}) đã quét VietQR và báo đã chuyển khoản số tiền ${formattedPrice} cho đơn đặt phòng #${bookingId} - Phòng ${booking.room_number || ''} (${booking.room_name || 'Phòng nghỉ'}). Admin vui lòng kiểm tra tài khoản nhận tiền và bấm "Đã Nhận Tiền & Duyệt".`,
+          bookingId,
+          booking.total_price,
+          booking.guest_name,
+          booking.room_name || 'Phòng nghỉ'
+        ]
+      );
+    } else {
+      // Thông báo đặt phòng thanh toán tại quầy
+      await dbRun(
+        `INSERT INTO notifications (id, type, title, message, booking_id, amount, guest_name, room_name, is_read, created_at)
+         VALUES (?, 'PAYMENT_SUBMITTED', ?, ?, ?, ?, ?, ?, 0, DATETIME('now'))`,
+        [
+          notifId,
+          'Đơn Đặt Phòng Mới (Thanh Toán Tại Khách Sạn)',
+          `Khách hàng ${booking.guest_name} (${booking.guest_phone}) đã đặt phòng #${bookingId} - Phòng ${booking.room_number || ''} (${booking.room_name || 'Phòng nghỉ'}) với hình thức thanh toán trực tiếp tại quầy lễ tân: ${formattedPrice}.`,
+          bookingId,
+          booking.total_price,
+          booking.guest_name,
+          booking.room_name || 'Phòng nghỉ'
+        ]
+      );
+    }
+
     res.json({
-      message: 'Xác nhận thanh toán thành công!',
+      message: isPayAtHotel 
+        ? 'Xác nhận đặt phòng tại khách sạn thành công!' 
+        : 'Đã gửi thông tin chuyển khoản tới Admin! Quản trị viên đang kiểm tra tài khoản ngân hàng để xác nhận đơn.',
       transactionId,
       status: bookingStatus
     });
   } catch (error) {
     console.error('Payment error:', error);
     res.status(500).json({ error: 'Lỗi khi xử lý thanh toán' });
+  }
+});
+
+// Admin kiểm tra ngân hàng và Xác nhận đã nhận tiền thành công
+app.post('/api/admin/bookings/:id/confirm-payment', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+    const booking = await dbGet(
+      `SELECT b.*, r.name as room_name, r.room_number 
+       FROM bookings b 
+       LEFT JOIN rooms r ON b.room_id = r.id 
+       WHERE b.id = ?`,
+      [bookingId]
+    );
+    if (!booking) return res.status(404).json({ error: 'Đơn đặt phòng không tồn tại' });
+
+    // Cập nhật đơn sang CONFIRMED và thanh toán sang SUCCESS
+    await dbRun(`UPDATE bookings SET status = 'CONFIRMED' WHERE id = ?`, [bookingId]);
+    await dbRun(
+      `UPDATE payments SET status = 'SUCCESS', paid_at = DATETIME('now') WHERE booking_id = ?`,
+      [bookingId]
+    );
+
+    // Đánh dấu phòng đã kín khách
+    await dbRun(`UPDATE rooms SET is_available = 0 WHERE id = ?`, [booking.room_id]);
+
+    // Gửi thông báo thanh toán thành công
+    const notifId = 'notif_cf_' + Date.now();
+    const formattedPrice = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(booking.total_price || 0);
+    await dbRun(
+      `INSERT INTO notifications (id, type, title, message, booking_id, amount, guest_name, room_name, is_read, created_at)
+       VALUES (?, 'PAYMENT_SUCCESS', ?, ?, ?, ?, ?, ?, 0, DATETIME('now'))`,
+      [
+        notifId,
+        'Admin Đã Xác Nhận Nhận Đủ Tiền & Duyệt Đơn!',
+        `Admin đã kiểm tra tài khoản ngân hàng và xác nhận nhận đủ số tiền ${formattedPrice} của khách ${booking.guest_name} (${booking.guest_phone}) cho đơn #${bookingId}. Đơn đã được phê duyệt thành công.`,
+        bookingId,
+        booking.total_price,
+        booking.guest_name,
+        booking.room_name || 'Phòng nghỉ'
+      ]
+    );
+
+    res.json({ message: `Đã xác nhận nhận đủ tiền và duyệt đơn #${bookingId} thành công!`, bookingId });
+  } catch (error) {
+    console.error('Confirm payment error:', error);
+    res.status(500).json({ error: 'Lỗi khi xác nhận nhận tiền' });
+  }
+});
+
+// Admin kiểm tra ngân hàng và Báo chưa nhận được tiền
+app.post('/api/admin/bookings/:id/reject-payment', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+    const { reason } = req.body;
+    const booking = await dbGet(
+      `SELECT b.*, r.name as room_name, r.room_number 
+       FROM bookings b 
+       LEFT JOIN rooms r ON b.room_id = r.id 
+       WHERE b.id = ?`,
+      [bookingId]
+    );
+    if (!booking) return res.status(404).json({ error: 'Đơn đặt phòng không tồn tại' });
+
+    // Đưa đơn về trạng thái PAYMENT_FAILED hoặc PENDING để khách thử lại
+    await dbRun(`UPDATE bookings SET status = 'PAYMENT_FAILED' WHERE id = ?`, [bookingId]);
+    await dbRun(`UPDATE payments SET status = 'FAILED' WHERE booking_id = ?`, [bookingId]);
+
+    const notifId = 'notif_rj_' + Date.now();
+    const formattedPrice = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(booking.total_price || 0);
+    await dbRun(
+      `INSERT INTO notifications (id, type, title, message, booking_id, amount, guest_name, room_name, is_read, created_at)
+       VALUES (?, 'PAYMENT_FAILED', ?, ?, ?, ?, ?, ?, 0, DATETIME('now'))`,
+      [
+        notifId,
+        'Chưa Nhận Được Tiền Đơn #' + bookingId,
+        `Admin đã kiểm tra tài khoản nhưng chưa thấy giao dịch chuyển khoản ${formattedPrice} của khách ${booking.guest_name} (${booking.guest_phone}). ${reason ? 'Lý do: ' + reason : 'Đơn đã chuyển về trạng thái Chưa thanh toán.'}`,
+        bookingId,
+        booking.total_price,
+        booking.guest_name,
+        booking.room_name || 'Phòng nghỉ'
+      ]
+    );
+
+    res.json({ message: `Đã báo chưa nhận được tiền cho đơn #${bookingId}`, bookingId });
+  } catch (error) {
+    console.error('Reject payment error:', error);
+    res.status(500).json({ error: 'Lỗi khi từ chối xác nhận thanh toán' });
+  }
+});
+
+// API Ghi nhận thanh toán thất bại và thông báo về Admin
+app.post('/api/bookings/:id/payment-failed', async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+    const { reason } = req.body;
+    const booking = await dbGet(
+      `SELECT b.*, r.name as room_name, r.room_number 
+       FROM bookings b 
+       LEFT JOIN rooms r ON b.room_id = r.id 
+       WHERE b.id = ?`,
+      [bookingId]
+    );
+    if (!booking) return res.status(404).json({ error: 'Đơn đặt phòng không tồn tại' });
+
+    const paymentId = 'pay_fail_' + Date.now();
+    await dbRun(
+      `INSERT INTO payments (id, booking_id, method, amount, status, paid_at)
+       VALUES (?, ?, 'VNPAY_VIETQR', ?, 'FAILED', DATETIME('now'))`,
+      [paymentId, bookingId, booking.total_price]
+    );
+
+    const notifId = 'notif_' + Date.now();
+    const formattedPrice = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(booking.total_price);
+    const reasonDetail = reason || 'Khách hàng hủy giao dịch hoặc chuyển khoản thất bại/hết hạn';
+
+    await dbRun(
+      `INSERT INTO notifications (id, type, title, message, booking_id, amount, guest_name, room_name, is_read, created_at)
+       VALUES (?, 'PAYMENT_FAILED', ?, ?, ?, ?, ?, ?, 0, DATETIME('now'))`,
+      [
+        notifId,
+        'Thanh Toán Tiền Phòng Thất Bại!',
+        `Đơn đặt phòng #${bookingId} của khách ${booking.guest_name} (${booking.guest_phone}) thanh toán thất bại (${reasonDetail}). Số tiền: ${formattedPrice}. Vui lòng kiểm tra và liên hệ hỗ trợ khách hàng!`,
+        bookingId,
+        booking.total_price,
+        booking.guest_name,
+        booking.room_name || 'Phòng nghỉ'
+      ]
+    );
+
+    res.json({ message: 'Đã ghi nhận thanh toán thất bại và báo về Admin', notifId });
+  } catch (error) {
+    console.error('Payment failed logging error:', error);
+    res.status(500).json({ error: 'Lỗi ghi nhận thanh toán thất bại' });
+  }
+});
+
+// ----------------------------------------------------
+// ADMIN NOTIFICATIONS API
+// ----------------------------------------------------
+app.get('/api/admin/notifications', async (req, res) => {
+  try {
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        booking_id TEXT,
+        amount REAL,
+        guest_name TEXT,
+        room_name TEXT,
+        is_read BOOLEAN DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    const notifications = await dbAll('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 50');
+    const unreadCountRow = await dbGet('SELECT COUNT(*) as count FROM notifications WHERE is_read = 0');
+    res.json({
+      notifications,
+      unreadCount: unreadCountRow ? unreadCountRow.count : 0
+    });
+  } catch (error) {
+    console.error('Fetch notifications error:', error);
+    res.status(500).json({ error: 'Lỗi khi lấy danh sách thông báo' });
+  }
+});
+
+app.put('/api/admin/notifications/:id/read', async (req, res) => {
+  try {
+    await dbRun('UPDATE notifications SET is_read = 1 WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Đã đánh dấu đã đọc' });
+  } catch (error) {
+    res.status(500).json({ error: 'Lỗi khi cập nhật thông báo' });
+  }
+});
+
+app.put('/api/admin/notifications/mark-all-read', async (req, res) => {
+  try {
+    await dbRun('UPDATE notifications SET is_read = 1');
+    res.json({ message: 'Đã đánh dấu tất cả là đã đọc' });
+  } catch (error) {
+    res.status(500).json({ error: 'Lỗi khi cập nhật thông báo' });
+  }
+});
+
+app.delete('/api/admin/notifications/:id', async (req, res) => {
+  try {
+    await dbRun('DELETE FROM notifications WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Đã xóa thông báo' });
+  } catch (error) {
+    res.status(500).json({ error: 'Lỗi khi xóa thông báo' });
+  }
+});
+
+// ----------------------------------------------------
+// PAYMENT CONFIG API (Cấu hình tài khoản nhận tiền thật MoMo & VNPay / VietQR)
+// ----------------------------------------------------
+const defaultPaymentConfig = {
+  bankId: 'MB',
+  bankName: 'MBBank (Ngân hàng Quân Đội)',
+  accountNo: '0355133380',
+  accountName: 'DANG QUOC TOAN',
+  momoPhone: '0355133380',
+  momoName: 'DANG QUOC TOAN'
+};
+
+app.get('/api/payment-config', async (req, res) => {
+  try {
+    const row = await dbGet('SELECT * FROM payment_configs WHERE id = 1');
+    if (row && row.data) {
+      return res.json(JSON.parse(row.data));
+    }
+    res.json(defaultPaymentConfig);
+  } catch (error) {
+    console.error('Fetch payment config error:', error);
+    res.json(defaultPaymentConfig);
+  }
+});
+
+app.put('/api/payment-config', async (req, res) => {
+  try {
+    const { bankId, bankName, accountNo, accountName, momoPhone, momoName } = req.body;
+    const current = await dbGet('SELECT * FROM payment_configs WHERE id = 1');
+    const existing = current && current.data ? JSON.parse(current.data) : defaultPaymentConfig;
+
+    const updated = {
+      bankId: bankId || existing.bankId,
+      bankName: bankName || existing.bankName,
+      accountNo: accountNo || existing.accountNo,
+      accountName: (accountName || existing.accountName).toUpperCase(),
+      momoPhone: momoPhone || existing.momoPhone,
+      momoName: (momoName || existing.momoName).toUpperCase()
+    };
+
+    await dbRun('CREATE TABLE IF NOT EXISTS payment_configs (id INTEGER PRIMARY KEY, data TEXT NOT NULL)');
+    await dbRun('INSERT OR REPLACE INTO payment_configs (id, data) VALUES (1, ?)', [JSON.stringify(updated)]);
+
+    res.json({ message: 'Lưu thông tin tài khoản nhận tiền thành công!', config: updated });
+  } catch (error) {
+    console.error('Save payment config error:', error);
+    res.status(500).json({ error: 'Không thể lưu cấu hình nhận tiền' });
   }
 });
 
@@ -535,6 +923,102 @@ app.put('/api/bookings/:id/cancel', authenticateToken, async (req, res) => {
     res.json({ message: 'Hủy đơn đặt phòng thành công' });
   } catch (error) {
     res.status(500).json({ error: 'Lỗi khi hủy đơn' });
+  }
+});
+
+// ----------------------------------------------------
+// REFUND WORKFLOW API (HỦY PHÒNG & CHUYỂN TIỀN HOÀN TRẢ)
+// ----------------------------------------------------
+app.post('/api/bookings/:id/request-refund', authenticateToken, async (req, res) => {
+  try {
+    const { refund_bank, refund_account_no, refund_account_name, refund_reason } = req.body;
+    if (!refund_bank || !refund_account_no || !refund_account_name) {
+      return res.status(400).json({ error: 'Vui lòng cung cấp đầy đủ thông tin ngân hàng, số tài khoản và tên chủ tài khoản nhận tiền hoàn' });
+    }
+
+    const booking = await dbGet('SELECT b.*, r.name as room_name, r.room_number FROM bookings b JOIN rooms r ON b.room_id = r.id WHERE b.id = ?', [req.params.id]);
+    if (!booking) return res.status(404).json({ error: 'Đơn đặt phòng không tồn tại' });
+
+    if (booking.user_id !== req.user.id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Bạn không có quyền yêu cầu hoàn tiền cho đơn này' });
+    }
+
+    // Cập nhật trạng thái đơn thành REFUND_REQUESTED và lưu tài khoản nhận lại tiền
+    await dbRun(`
+      UPDATE bookings 
+      SET status = 'REFUND_REQUESTED',
+          refund_bank = ?,
+          refund_account_no = ?,
+          refund_account_name = ?,
+          refund_reason = ?
+      WHERE id = ?
+    `, [refund_bank, refund_account_no.trim(), refund_account_name.trim().toUpperCase(), refund_reason || '', req.params.id]);
+
+    const formattedPrice = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(booking.total_price || 0);
+
+    // Gửi thông báo ngay về phía Admin
+    const notifId = 'notif_ref_' + Date.now();
+    await dbRun(`
+      INSERT INTO notifications (id, type, title, message, booking_id, amount, guest_name, room_name, is_read, created_at)
+      VALUES (?, 'REFUND_REQUESTED', ?, ?, ?, ?, ?, ?, 0, DATETIME('now'))
+    `, [
+      notifId,
+      'Yêu Cầu Hủy Phòng & Hoàn Tiền!',
+      `Khách hàng ${booking.guest_name} (${booking.guest_phone}) yêu cầu hủy phòng #${booking.id} - Phòng ${booking.room_number || ''} (${booking.room_name || ''}) và hoàn lại số tiền ${formattedPrice}. Tài khoản nhận: ${refund_bank} - ${refund_account_no} (${refund_account_name}). Lý do: ${refund_reason || 'Không ghi chú'}.`,
+      booking.id,
+      booking.total_price,
+      booking.guest_name,
+      booking.room_name
+    ]);
+
+    res.json({ message: 'Yêu cầu hủy phòng và hoàn tiền đã được gửi tới Quản trị viên (Admin). Admin sẽ kiểm tra và chuyển khoản hoàn trả sớm nhất!' });
+  } catch (error) {
+    console.error('Request refund error:', error);
+    res.status(500).json({ error: 'Lỗi máy chủ khi gửi yêu cầu hoàn tiền' });
+  }
+});
+
+// Admin xác nhận đã chuyển tiền hoàn trả cho khách
+app.post('/api/admin/bookings/:id/confirm-refund', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const booking = await dbGet('SELECT b.*, r.name as room_name, r.room_number FROM bookings b JOIN rooms r ON b.room_id = r.id WHERE b.id = ?', [req.params.id]);
+    if (!booking) return res.status(404).json({ error: 'Đơn đặt phòng không tồn tại' });
+
+    // Cập nhật trạng thái booking thành REFUNDED
+    await dbRun(`
+      UPDATE bookings 
+      SET status = 'REFUNDED',
+          refunded_at = DATETIME('now')
+      WHERE id = ?
+    `, [req.params.id]);
+
+    // Cập nhật payments thành REFUNDED
+    await dbRun(`UPDATE payments SET status = 'REFUNDED' WHERE booking_id = ?`, [req.params.id]);
+
+    // Giải phóng phòng để khách khác có thể đặt
+    await dbRun(`UPDATE rooms SET is_available = 1 WHERE id = ?`, [booking.room_id]);
+
+    const formattedPrice = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(booking.total_price || 0);
+
+    // Gửi thông báo xác nhận hoàn tất hoàn tiền
+    const notifId = 'notif_done_' + Date.now();
+    await dbRun(`
+      INSERT INTO notifications (id, type, title, message, booking_id, amount, guest_name, room_name, is_read, created_at)
+      VALUES (?, 'REFUND_COMPLETED', ?, ?, ?, ?, ?, ?, 0, DATETIME('now'))
+    `, [
+      notifId,
+      'Đã Hoàn Tiền Chuyển Khoản Xong!',
+      `Đã chuyển tiền hoàn trả ${formattedPrice} về STK ${booking.refund_bank || 'MB'} - ${booking.refund_account_no} (${booking.refund_account_name}) cho khách ${booking.guest_name}. Đơn #${booking.id} đã hoàn tất và phòng ${booking.room_number || ''} đã mở lại sẵn sàng.`,
+      booking.id,
+      booking.total_price,
+      booking.guest_name,
+      booking.room_name
+    ]);
+
+    res.json({ message: 'Xác nhận đã chuyển tiền hoàn trả cho khách thành công! Đơn đặt đã chuyển trạng thái ĐÃ HOÀN TIỀN.' });
+  } catch (error) {
+    console.error('Confirm refund error:', error);
+    res.status(500).json({ error: 'Lỗi khi xác nhận hoàn tiền' });
   }
 });
 
@@ -574,14 +1058,28 @@ app.post('/api/reviews', authenticateToken, async (req, res) => {
 // ----------------------------------------------------
 app.get('/api/admin/stats', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Tự động hoàn thành các đơn đã qua ngày trả phòng
+    await dbRun(
+      `UPDATE bookings SET status = 'COMPLETED' 
+       WHERE check_out <= ? AND status IN ('CONFIRMED', 'PAID')`,
+      [todayStr]
+    );
+
     const revenueRow = await dbGet("SELECT SUM(total_price) as totalRevenue FROM bookings WHERE status = 'CONFIRMED' OR status = 'COMPLETED'");
     const pendingRevenueRow = await dbGet("SELECT SUM(total_price) as pendingRevenue FROM bookings WHERE status = 'PENDING'");
     const totalBookingsRow = await dbGet('SELECT COUNT(*) as totalBookings FROM bookings');
     const confirmedBookingsRow = await dbGet("SELECT COUNT(*) as confirmedBookings FROM bookings WHERE status = 'CONFIRMED' OR status = 'COMPLETED'");
     const totalRoomsRow = await dbGet('SELECT COUNT(*) as totalRooms FROM rooms');
 
+    // Phòng hiện đang có khách ở hôm nay
     const activeOccupiedRoomsRow = await dbGet(
-      "SELECT COUNT(DISTINCT room_id) as occupiedCount FROM bookings WHERE status = 'CONFIRMED' OR status = 'COMPLETED'"
+      `SELECT COUNT(DISTINCT room_id) as occupiedCount 
+       FROM bookings 
+       WHERE status IN ('CONFIRMED', 'PAID') 
+         AND check_in <= ? AND check_out > ?`,
+      [todayStr, todayStr]
     );
 
     const occupiedRoomsCount = activeOccupiedRoomsRow ? activeOccupiedRoomsRow.occupiedCount : 0;
@@ -621,6 +1119,15 @@ app.get('/api/admin/stats', authenticateToken, requireAdmin, async (req, res) =>
 
 app.get('/api/admin/rooms', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Tự động hoàn thành các đơn đã qua ngày trả phòng
+    await dbRun(
+      `UPDATE bookings SET status = 'COMPLETED' 
+       WHERE check_out <= ? AND status IN ('CONFIRMED', 'PAID')`,
+      [todayStr]
+    );
+
     const rooms = await dbAll(
       `SELECT r.*, rt.name as room_type_name 
        FROM rooms r 
@@ -632,25 +1139,37 @@ app.get('/api/admin/rooms', authenticateToken, requireAdmin, async (req, res) =>
       `SELECT b.*, u.name as customer_name, u.email as customer_email, u.phone as customer_phone
        FROM bookings b
        LEFT JOIN users u ON b.user_id = u.id
-       WHERE b.status = 'CONFIRMED' OR b.status = 'PENDING'`
+       WHERE b.status IN ('CONFIRMED', 'PAID', 'PENDING', 'AWAITING_PAYMENT_CONFIRMATION')
+         AND b.check_out > ?
+       ORDER BY b.check_in ASC`,
+      [todayStr]
     );
 
     const formatted = rooms.map(r => {
-      const currentBooking = activeBookings.find(b => b.room_id === r.id);
+      const currentStay = activeBookings.find(b => b.room_id === r.id && b.check_in <= todayStr && b.check_out > todayStr);
+      const roomBookings = activeBookings.filter(b => b.room_id === r.id);
+
       return {
         ...r,
         images: JSON.parse(r.images || '[]'),
         amenities: JSON.parse(r.amenities || '[]'),
-        occupancy_status: currentBooking ? 'OCCUPIED' : 'AVAILABLE',
-        current_guest: currentBooking ? {
-          guest_name: currentBooking.guest_name,
-          guest_email: currentBooking.guest_email,
-          guest_phone: currentBooking.guest_phone,
-          check_in: currentBooking.check_in,
-          check_out: currentBooking.check_out,
-          booking_id: currentBooking.id,
-          booking_status: currentBooking.status
-        } : null
+        occupancy_status: (r.is_available === 0 || currentStay) ? 'OCCUPIED' : 'AVAILABLE',
+        current_guest: currentStay ? {
+          guest_name: currentStay.guest_name,
+          guest_email: currentStay.guest_email,
+          guest_phone: currentStay.guest_phone,
+          check_in: currentStay.check_in,
+          check_out: currentStay.check_out,
+          booking_id: currentStay.id,
+          booking_status: currentStay.status
+        } : null,
+        booked_ranges: roomBookings.map(b => ({
+          booking_id: b.id,
+          guest_name: b.guest_name,
+          check_in: b.check_in,
+          check_out: b.check_out,
+          status: b.status
+        }))
       };
     });
 
@@ -808,6 +1327,44 @@ app.put('/api/admin/bookings/:id/status', authenticateToken, requireAdmin, async
     res.json({ message: `Cập nhật trạng thái đơn thành ${status} thành công` });
   } catch (error) {
     res.status(500).json({ error: 'Lỗi khi cập nhật đơn' });
+  }
+});
+
+// Admin thực hiện trả phòng (Check-out) cho khách và giải phóng phòng ngay lập tức
+app.post('/api/admin/bookings/:id/checkout', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const booking = await dbGet(
+      'SELECT b.*, r.name as room_name, r.room_number FROM bookings b JOIN rooms r ON b.room_id = r.id WHERE b.id = ?',
+      [req.params.id]
+    );
+    if (!booking) return res.status(404).json({ error: 'Đơn đặt phòng không tồn tại' });
+
+    // Cập nhật trạng thái thành COMPLETED
+    await dbRun("UPDATE bookings SET status = 'COMPLETED' WHERE id = ?", [req.params.id]);
+
+    // Đảm bảo phòng ở trạng thái sẵn sàng đón khách
+    await dbRun('UPDATE rooms SET is_available = 1 WHERE id = ?', [booking.room_id]);
+
+    // Tạo thông báo hoàn tất trả phòng
+    const notifId = 'notif_co_' + Date.now();
+    await dbRun(
+      `INSERT INTO notifications (id, type, title, message, booking_id, amount, guest_name, room_name, is_read, created_at)
+       VALUES (?, 'CHECKOUT_COMPLETED', ?, ?, ?, ?, ?, ?, 0, DATETIME('now'))`,
+      [
+        notifId,
+        'Khách Đã Trả Phòng (Check-out)',
+        `Khách hàng ${booking.guest_name} đã hoàn tất thủ tục trả phòng ${booking.room_number || ''} (${booking.room_name}). Phòng đã trống và sẵn sàng đón lượt khách tiếp theo cho các ngày chưa có lịch!`,
+        booking.id,
+        booking.total_price,
+        booking.guest_name,
+        booking.room_name
+      ]
+    );
+
+    res.json({ message: `Đã hoàn tất trả phòng cho khách ${booking.guest_name}! Phòng ${booking.room_number || ''} đã sẵn sàng đón khách mới.` });
+  } catch (error) {
+    console.error('Checkout error:', error);
+    res.status(500).json({ error: 'Lỗi khi thực hiện thủ tục trả phòng' });
   }
 });
 

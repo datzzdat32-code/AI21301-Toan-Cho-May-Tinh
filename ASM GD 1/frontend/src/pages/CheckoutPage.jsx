@@ -158,37 +158,21 @@ export default function CheckoutPage() {
                 <span>Phương Thức Thanh Toán</span>
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                 
                 {/* VNPAY */}
                 <label
                   onClick={() => setPaymentMethod('VNPAY')}
                   className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${
                     paymentMethod === 'VNPAY'
-                      ? 'bg-blue-50/80 border-blue-600 text-slate-900 shadow-sm'
+                      ? 'bg-blue-50 border-blue-600 text-slate-900 shadow-sm ring-1 ring-blue-400'
                       : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
                   }`}
                 >
-                  <QrCode className="w-6 h-6 text-blue-600 shrink-0" />
+                  <QrCode className="w-8 h-8 text-blue-600 shrink-0" />
                   <div>
-                    <h4 className="font-bold text-xs text-slate-900">VNPay QR Code</h4>
-                    <p className="text-[11px] text-slate-500">Quét mã Banking tự động</p>
-                  </div>
-                </label>
-
-                {/* MOMO */}
-                <label
-                  onClick={() => setPaymentMethod('MOMO_QR')}
-                  className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${
-                    paymentMethod === 'MOMO_QR'
-                      ? 'bg-blue-50/80 border-blue-600 text-slate-900 shadow-sm'
-                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <QrCode className="w-6 h-6 text-pink-600 shrink-0" />
-                  <div>
-                    <h4 className="font-bold text-xs text-slate-900">Ví ĐT MoMo QR</h4>
-                    <p className="text-[11px] text-slate-500">Thanh toán app MoMo nhanh</p>
+                    <h4 className="font-bold text-xs text-slate-900">VNPay & VietQR 24/7</h4>
+                    <p className="text-[11px] text-blue-700 font-medium">Quét mã mọi ngân hàng & VNPay</p>
                   </div>
                 </label>
 
@@ -197,14 +181,14 @@ export default function CheckoutPage() {
                   onClick={() => setPaymentMethod('CREDIT_CARD')}
                   className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${
                     paymentMethod === 'CREDIT_CARD'
-                      ? 'bg-blue-50/80 border-blue-600 text-slate-900 shadow-sm'
+                      ? 'bg-blue-50 border-blue-600 text-slate-900 shadow-sm ring-1 ring-blue-400'
                       : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
                   }`}
                 >
-                  <CreditCard className="w-6 h-6 text-sky-600 shrink-0" />
+                  <CreditCard className="w-8 h-8 text-sky-600 shrink-0" />
                   <div>
-                    <h4 className="font-bold text-xs text-slate-900">Thẻ Tín Dụng Quốc Tế</h4>
-                    <p className="text-[11px] text-slate-500">Visa, Mastercard, JCB</p>
+                    <h4 className="font-bold text-xs text-slate-900">Thẻ Quốc Tế</h4>
+                    <p className="text-[11px] text-slate-500 font-medium">Visa, Mastercard, JCB</p>
                   </div>
                 </label>
 
@@ -213,14 +197,14 @@ export default function CheckoutPage() {
                   onClick={() => setPaymentMethod('PAY_AT_HOTEL')}
                   className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${
                     paymentMethod === 'PAY_AT_HOTEL'
-                      ? 'bg-blue-50/80 border-blue-600 text-slate-900 shadow-sm'
+                      ? 'bg-emerald-50 border-emerald-600 text-slate-900 shadow-sm ring-1 ring-emerald-400'
                       : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
                   }`}
                 >
-                  <Building2 className="w-6 h-6 text-emerald-600 shrink-0" />
+                  <Building2 className="w-8 h-8 text-emerald-600 shrink-0" />
                   <div>
-                    <h4 className="font-bold text-xs text-slate-900">Thanh Toán Tại Quầy</h4>
-                    <p className="text-[11px] text-slate-500">Trả tiền mặt khi Check-in</p>
+                    <h4 className="font-bold text-xs text-slate-900">Tại Khách Sạn</h4>
+                    <p className="text-[11px] text-emerald-700 font-medium">Trả tiền khi Check-in</p>
                   </div>
                 </label>
 

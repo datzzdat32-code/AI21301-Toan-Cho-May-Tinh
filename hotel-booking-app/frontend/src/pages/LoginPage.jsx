@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Compass, Lock, Mail, User, Phone, LogIn, UserPlus, Sparkles, ShieldAlert } from 'lucide-react';
+import { Lock, Mail, User, Phone, LogIn, UserPlus, Sparkles, ShieldAlert, ArrowLeft } from 'lucide-react';
 
 export default function LoginPage() {
   const [searchParams] = useSearchParams();
@@ -69,24 +69,38 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-6 bg-white border border-slate-200 p-8 rounded-2xl shadow-xl relative">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 relative">
+      
+      {/* Background ambient lighting */}
+      <div className="absolute top-1/4 left-1/3 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="max-w-md w-full space-y-6 bg-white border border-slate-200/90 p-8 sm:p-9 rounded-3xl shadow-xl relative z-10">
         
+        {/* Back Link */}
+        <Link to="/" className="inline-flex items-center gap-1.5 text-slate-500 hover:text-blue-600 text-xs font-bold transition-colors">
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Về trang chủ</span>
+        </Link>
+
         {/* Brand header */}
         <div className="text-center space-y-2">
-          <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white mx-auto shadow-md shadow-blue-500/20">
-            <Compass className="w-7 h-7" />
+          <div className="w-13 h-13 bg-gradient-to-tr from-blue-700 via-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white mx-auto shadow-md shadow-blue-500/25 ring-2 ring-blue-100">
+            <span className="text-2xl font-black">Vn</span>
           </div>
-          <h2 className="text-2xl font-extrabold text-slate-900 tracking-wider">GRAND HORIZON</h2>
-          <p className="text-xs text-blue-600 font-bold uppercase tracking-widest">Tài Khoản & Đặt Phòng Cao Cấp</p>
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+            VnStay<span className="text-blue-600">.vn</span>
+          </h2>
+          <p className="text-xs text-blue-700 font-extrabold uppercase tracking-widest">
+            Hệ Thống Đặt Phòng Khách Sạn & Resort
+          </p>
         </div>
 
         {/* Tab switch */}
-        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+        <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
           <button
             onClick={() => { setActiveTab('login'); setError(''); }}
-            className={`flex-1 py-2 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'login' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            className={`flex-1 py-2 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              activeTab === 'login' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <LogIn className="w-4 h-4" />
@@ -94,8 +108,8 @@ export default function LoginPage() {
           </button>
           <button
             onClick={() => { setActiveTab('register'); setError(''); }}
-            className={`flex-1 py-2 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-1.5 ${
-              activeTab === 'register' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            className={`flex-1 py-2 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              activeTab === 'register' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <UserPlus className="w-4 h-4" />
@@ -104,31 +118,31 @@ export default function LoginPage() {
         </div>
 
         {/* Demo Accounts Quick Fill Buttons */}
-        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
-          <p className="text-[11px] text-slate-500 text-center font-semibold">💡 Thử nghiệm nhanh với tài khoản mẫu:</p>
+        <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2">
+          <p className="text-[11px] text-slate-500 text-center font-bold">💡 Thử nghiệm nhanh với tài khoản có sẵn:</p>
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={fillAdmin}
               type="button"
-              className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-bold text-center flex items-center justify-center gap-1 transition-colors"
+              className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-extrabold text-center flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
               <ShieldAlert className="w-3.5 h-3.5" />
-              Tài Khoản Admin
+              <span>Admin Quản Trị</span>
             </button>
             <button
               onClick={fillCustomer}
               type="button"
-              className="px-3 py-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-[11px] font-bold text-center flex items-center justify-center gap-1 transition-colors"
+              className="px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-[11px] font-extrabold text-center flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
               <User className="w-3.5 h-3.5" />
-              Tài Khoản Khách
+              <span>Khách Hàng Mẫu</span>
             </button>
           </div>
         </div>
 
         {/* Error message */}
         {error && (
-          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-xs font-semibold text-center">
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-xs font-bold text-center">
             {error}
           </div>
         )}
@@ -136,9 +150,9 @@ export default function LoginPage() {
         {/* LOGIN FORM */}
         {activeTab === 'login' ? (
           <form onSubmit={handleLoginSubmit} className="space-y-4">
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-600">Địa chỉ Email</label>
-              <div className="flex items-center bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200">
+              <div className="flex items-center bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
                 <Mail className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
                 <input
                   type="email"
@@ -151,9 +165,9 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-600">Mật khẩu</label>
-              <div className="flex items-center bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200">
+              <div className="flex items-center bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
                 <Lock className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
                 <input
                   type="password"
@@ -169,7 +183,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-xl font-bold text-xs bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all disabled:opacity-50"
+              className="w-full py-3 rounded-2xl font-extrabold text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 transition-all disabled:opacity-50 cursor-pointer"
             >
               {loading ? 'Đang Đăng Nhập...' : 'Đăng Nhập Ngay'}
             </button>
@@ -177,9 +191,9 @@ export default function LoginPage() {
         ) : (
           /* REGISTER FORM */
           <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-600">Họ và Tên (*)</label>
-              <div className="flex items-center bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+              <div className="flex items-center bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
                 <User className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
                 <input
                   type="text"
@@ -192,9 +206,9 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-600">Địa chỉ Email (*)</label>
-              <div className="flex items-center bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+              <div className="flex items-center bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
                 <Mail className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
                 <input
                   type="email"
@@ -207,9 +221,9 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-600">Số Điện Thoại</label>
-              <div className="flex items-center bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+              <div className="flex items-center bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
                 <Phone className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
                 <input
                   type="text"
@@ -221,9 +235,9 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-600">Mật Khẩu (*)</label>
-              <div className="flex items-center bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+              <div className="flex items-center bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
                 <Lock className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
                 <input
                   type="password"
@@ -239,7 +253,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-xl font-bold text-xs bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all disabled:opacity-50"
+              className="w-full py-3 rounded-2xl font-extrabold text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 transition-all disabled:opacity-50 cursor-pointer"
             >
               {loading ? 'Đang Đăng Ký...' : 'Tạo Tài Khoản Mới'}
             </button>
